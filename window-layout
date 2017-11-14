@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -e
 
+# Most windows have their X,Y coordinates shifted by an amount equal to the
+# window decorations (titlebar, edges, etc.). There are some programs which
+# don't follow this rule.
+# This list should contain the name of the program as given by `ps -p PID`
+# separated by a single space each.
+DECORATION_EXCEPTIONS="konsole"
+# Programs known to have X,Y shift:
+# - chrome (only if the "Use system title bar and borders" is set)
+# - atom, pidgin, thunderbird, paprefs, pactl
+
 USAGE=$(cat << EOF
 Usage:
 $0 <save|load> [savename] -- save/load window layout with optional savename
@@ -33,6 +43,8 @@ save_layout () {
     # ID Desktop PID X Y Width Height Host? Title
     echo $window_info
     id="$(echo "$window_info" | awk '{print $1}')"
+    pid="$(echo $window_info | awk '{print $3}')"
+    process_name="$(ps -p $pid -o comm=)"
     title="$(echo "$window_info" | awk '{print substr($0, index($0, $9))}')"
 
     # Get desktop, x, y, width, and height info
@@ -43,8 +55,14 @@ save_layout () {
     height="$(echo "$window_info" | awk '{print $7}')"
 
     # Save info to a line in our save file
-    echo "$id $desktop $x $y $width $height '$title'" >> "${SAVEPATH}/${savename}"
+    echo "$id $desktop $x $y $width $height $process_name '$title'" >> "${SAVEPATH}/${savename}"
   done
+}
+
+contains () {
+  local list="$1"
+  local key="$2"
+  [[ "$list" =~ (^|[[:space:]])"$key"($|[[:space:]]) ]] && return 0 || return 1
 }
 
 load_layout () {
@@ -58,12 +76,16 @@ load_layout () {
     y="$(echo "$window_info" | cut --delimiter ' ' --fields 4)"
     width="$(echo "$window_info" | cut --delimiter ' ' --fields 5)"
     height="$(echo "$window_info" | cut --delimiter ' ' --fields 6)"
+    process_name="$(echo $window_info | cut --delimiter ' ' --fields 7)"
     title="$(echo "$window_info" | awk '{print substr($0, index($0, $7))}')"
 
-    # Chrome and Atom editor need x,y adjusted by window decoration amounts
+    # Most programs need x,y adjusted by window decoration amounts.
     # Not sure why this is. I can't find any property unique to these windows
     # that suggests a different way to fix this other than this hard-coding.
-    if [[ $title =~ ' — Atom' ]] || [[ $title =~ ' - Google Chrome' ]]; then
+    # I've investigated the `xwininfo` of the window ID as well as the
+    # `xwininfo` of the parent window ID. Neither suggested a definite
+    # relationship between a property and whether the window needs x,y adjusted
+    if ! contains "$DECORATION_EXCEPTIONS" "$process_name" ; then
       # Get window decorations
       if ! xprop _NET_FRAME_EXTENTS -id $id ; then
         echo ""
