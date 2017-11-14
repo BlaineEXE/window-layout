@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -e
+
+USAGE=$(cat << EOF
+Usage:
+$0 <save|load> [savename] -- save/load window layout with optional savename
+$0 list                   -- list saves available to load
+$0 -h|--help              -- show this usage message
+EOF
+)
+
+if [[ $# -lt 1 ]]; then
+  echo "$USAGE"
+  exit 1
+fi
+mode="$1"
+shift
+
+savename="default"
+if [[ $# -ge 1 ]]; then
+  savename="$1"
+  shift
+fi
+
+SAVEPATH="${HOME}/.window-layout/"
+
+save_layout () {
+  local savename="$1"
+  mkdir -p "${SAVEPATH}"
+  rm -f "${SAVEPATH}/${savename}"
+
+  wmctrl -p -G -l | awk '($2 != -1)&&($3 != 0)&&($NF != "Desktop")' | while read window_info; do
+    # ID Desktop PID X Y Width Height Host? Title
+    echo $window_info
+    id="$(echo "$window_info" | awk '{print $1}')"
+    title="$(echo "$window_info" | awk '{print substr($0, index($0, $9))}')"
+
+    # Get desktop, x, y, width, and height info
+    desktop="$(echo $window_info | awk '{print $2}')"
+    x="$(echo "$window_info" | awk '{print $4}')"
+    y="$(echo "$window_info" | awk '{print $5}')"
+    width="$(echo "$window_info" | awk '{print $6}')"
+    height="$(echo "$window_info" | awk '{print $7}')"
+
+    # Save info to a line in our save file
+    echo "$id $desktop $x $y $width $height '$title'" >> "${SAVEPATH}/${savename}"
+  done
+}
+
+load_layout () {
+  local savename="$1"
+  cat "${SAVEPATH}/${savename}" | while read window_info; do
+    echo $window_info
+    # Read info from a line in our save file
+    id="$(echo $window_info | cut --delimiter ' ' --fields 1)"
+    desktop="$(echo "$window_info" | cut --delimiter ' ' --fields 2)"
+    x="$(echo "$window_info" | cut --delimiter ' ' --fields 3)"
+    y="$(echo "$window_info" | cut --delimiter ' ' --fields 4)"
+    width="$(echo "$window_info" | cut --delimiter ' ' --fields 5)"
+    height="$(echo "$window_info" | cut --delimiter ' ' --fields 6)"
+    title="$(echo "$window_info" | awk '{print substr($0, index($0, $7))}')"
+
+    # Chrome and Atom editor need x,y adjusted by window decoration amounts
+    # Not sure why this is. I can't find any property unique to these windows
+    # that suggests a different way to fix this other than this hard-coding.
+    if [[ $title =~ ' — Atom' ]] || [[ $title =~ ' - Google Chrome' ]]; then
+      # Get window decorations
+      decoration="$(xprop _NET_FRAME_EXTENTS -id $id | cut --delimiter '=' --fields 2 | tr --delete ' ')"
+      decor_left="$(echo $decoration | cut --delimiter ',' --fields 1)"
+      # decor_right="$(echo $decoration | cut --delimiter ',' --fields 2)"
+      decor_top="$(echo $decoration | cut --delimiter ',' --fields 3)"
+      # decor_bottom="$(echo $decoration | cut --delimiter ',' --fields 4)"
+      x=$(($x - $decor_left))
+      y=$(($y - $decor_top))
+      echo "New x,y computed: $x, $y"
+    fi
+
+    # Set position and desktop for each window ID
+    wmctrl -i -r "$id" -e "0,$x,$y,$width,$height"
+    wmctrl -i -r "$id" -t "$desktop"
+  done
+}
+
+list_saves () {
+  ls "${SAVEPATH}"
+}
+
+case $mode in
+  save)
+  save_layout "$savename"
+  ;;
+  load)
+  load_layout "$savename"
+  ;;
+  list)
+  list_saves
+  ;;
+  -h|--help)
+  echo "$USAGE"
+  ;;
+  *)
+  echo "ERR: invalid mode '$mode'"
+  echo "$USAGE"
+  exit 2
+  ;;
+esac
