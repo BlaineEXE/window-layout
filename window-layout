@@ -65,6 +65,11 @@ load_layout () {
     # that suggests a different way to fix this other than this hard-coding.
     if [[ $title =~ ' — Atom' ]] || [[ $title =~ ' - Google Chrome' ]]; then
       # Get window decorations
+      if ! xprop _NET_FRAME_EXTENTS -id $id ; then
+        echo ""
+        echo "WARN: Error getting window properties. It might not exist. Continuing."
+        continue
+      fi
       decoration="$(xprop _NET_FRAME_EXTENTS -id $id | cut --delimiter '=' --fields 2 | tr --delete ' ')"
       decor_left="$(echo $decoration | cut --delimiter ',' --fields 1)"
       # decor_right="$(echo $decoration | cut --delimiter ',' --fields 2)"
