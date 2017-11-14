@@ -42,17 +42,17 @@ save_layout () {
   wmctrl -p -G -l | awk '($2 != -1)&&($3 != 0)&&($NF != "Desktop")' | while read window_info; do
     # ID Desktop PID X Y Width Height Host? Title
     echo $window_info
-    id="$(echo "$window_info" | awk '{print $1}')"
+    id="$(echo $window_info | awk '{print $1}')"
     pid="$(echo $window_info | awk '{print $3}')"
     process_name="$(ps -p $pid -o comm=)"
-    title="$(echo "$window_info" | awk '{print substr($0, index($0, $9))}')"
+    title="$(echo $window_info | awk '{print substr($0, index($0, $9))}')"
 
     # Get desktop, x, y, width, and height info
     desktop="$(echo $window_info | awk '{print $2}')"
-    x="$(echo "$window_info" | awk '{print $4}')"
-    y="$(echo "$window_info" | awk '{print $5}')"
-    width="$(echo "$window_info" | awk '{print $6}')"
-    height="$(echo "$window_info" | awk '{print $7}')"
+    x="$(echo $window_info | awk '{print $4}')"
+    y="$(echo $window_info | awk '{print $5}')"
+    width="$(echo $window_info | awk '{print $6}')"
+    height="$(echo $window_info | awk '{print $7}')"
 
     # Save info to a line in our save file
     echo "$id $desktop $x $y $width $height $process_name '$title'" >> "${SAVEPATH}/${savename}"
@@ -71,13 +71,13 @@ load_layout () {
     echo $window_info
     # Read info from a line in our save file
     id="$(echo $window_info | cut --delimiter ' ' --fields 1)"
-    desktop="$(echo "$window_info" | cut --delimiter ' ' --fields 2)"
-    x="$(echo "$window_info" | cut --delimiter ' ' --fields 3)"
-    y="$(echo "$window_info" | cut --delimiter ' ' --fields 4)"
-    width="$(echo "$window_info" | cut --delimiter ' ' --fields 5)"
-    height="$(echo "$window_info" | cut --delimiter ' ' --fields 6)"
+    desktop="$(echo $window_info | cut --delimiter ' ' --fields 2)"
+    x="$(echo $window_info | cut --delimiter ' ' --fields 3)"
+    y="$(echo $window_info | cut --delimiter ' ' --fields 4)"
+    width="$(echo $window_info | cut --delimiter ' ' --fields 5)"
+    height="$(echo $window_info | cut --delimiter ' ' --fields 6)"
     process_name="$(echo $window_info | cut --delimiter ' ' --fields 7)"
-    title="$(echo "$window_info" | awk '{print substr($0, index($0, $7))}')"
+    title="$(echo $window_info | awk '{print substr($0, index($0, $8))}')"
 
     # Most programs need x,y adjusted by window decoration amounts.
     # Not sure why this is. I can't find any property unique to these windows
