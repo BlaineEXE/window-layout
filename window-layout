@@ -93,8 +93,11 @@ load_layout () {
 }
 
 list_saves () {
+  echo ""
   ls "${SAVEPATH}"
 }
+
+mkdir -p "${SAVEPATH}"
 
 case $mode in
   save)
