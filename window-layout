@@ -22,7 +22,7 @@ if [[ $# -ge 1 ]]; then
   shift
 fi
 
-SAVEPATH="/tmp/.window-layout/"
+SAVEPATH="/tmp/.window-layout-${USER}/"
 
 save_layout () {
   local savename="$1"
