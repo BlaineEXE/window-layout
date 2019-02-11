@@ -71,12 +71,15 @@ load_layout () {
     # as reported by xprop (but not by xwininfo) are offset, whereas windows
     # with static gravity are not. I haven't observed other gravities.
     # Some windows (chrome) aren't set at all, and the default is northwest.
+    # GTK windows do not give decoration information and do not need adjusted.
     properties="$(xprop WM_NORMAL_HINTS -id $id)"
     # ^ does not exist w/ chrome!?!?
-    if [[ ! "$properties" =~ "window gravity:" ]] || \
-       [[ "$properties" =~ "window gravity: NorthWest" ]] ; then
+    net_frame_extents="$(xprop _NET_FRAME_EXTENTS -id $id)"
+    if [[ ! "${net_frame_extents}" =~ "not found" ]] && \
+       ( [[ ! "$properties" =~ "window gravity:" ]] || \
+         [[ "$properties" =~ "window gravity: NorthWest" ]] ) ; then
       # Get window decorations
-      decoration="$(xprop _NET_FRAME_EXTENTS -id $id | cut --delimiter '=' --fields 2 | tr --delete ' ')"
+      decoration="$(echo "$net_frame_extents" | cut --delimiter '=' --fields 2 | tr --delete ' ')"
       decor_left="$(echo $decoration | cut --delimiter ',' --fields 1)"
       # decor_right="$(echo $decoration | cut --delimiter ',' --fields 2)"
       decor_top="$(echo $decoration | cut --delimiter ',' --fields 3)"
