@@ -6,6 +6,10 @@ I switch often from working on my laptop itself and on my laptop plugged into a
 docking station on my desk and found it frustrating to re-position most/all of
 my windows with each change.
 
+Windows are matched using various heuristics, and many windows should be able
+to be repositioned even after windows have been closed and reopened or the
+system has been rebooted.
+
 
 Usage
 -----
@@ -19,11 +23,3 @@ Load a configuration by running:
 ```
 $ window-layout load optional-save-name
 ```
-
-
-Limitations
------------
-Windows are saved by ID. If a program is closed and reopened, it will get a new
-ID. Similarly, all windows get a new ID if the system is rebooted. Therefore,
-the configuration must be saved every time windows are manually moved into
-position.
