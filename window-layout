@@ -1,123 +1,246 @@
-#!/usr/bin/env bash
-set -e
+#!/usr/bin/env python3
 
-USAGE=$(cat << EOF
-Usage:
-$0 <save|load> [savename] -- save/load window layout with optional savename
-$0 list                   -- list saves available to load
-$0 -h|--help              -- show this usage message
-EOF
-)
+import argparse
+import os
+import os.path as path
+import pickle
+import statistics as stat
+import subprocess
 
-if [[ $# -lt 1 ]]; then
-  echo "$USAGE"
-  exit 1
-fi
-mode="$1"
-shift
+parser = argparse.ArgumentParser(description="Save and load window layouts")
+parser.add_argument("operation", metavar="[save|load]", type=str, nargs=1,
+                    help="select whether to save or load the configuration with FILENAME")
+parser.add_argument("filename", metavar="FILENAME", type=str, nargs=1,
+                    help="file name to save/load windows to/from")
+args = parser.parse_args()
 
-savename="default"
-if [[ $# -ge 1 ]]; then
-  savename="$1"
-  shift
-fi
+def RunCommand(command):
+    res = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if res.returncode != 0:
+        raise Exception("could not run command: " + command + "\nresult: " + res)
+    return(res.stdout.decode("utf8"))
 
-SAVEPATH="/tmp/.window-layout-${USER}/"
+class Window:
+    def __init__(self):
+        return
 
-save_layout () {
-  local savename="$1"
-  mkdir -p "${SAVEPATH}"
-  rm -f "${SAVEPATH}/${savename}"
+    def ParseRawLine(self, line):
+        fields = line.split()
+        # strings
+        self.id = fields[0]
+        t = fields[8:]
+        self.title = " ".join(t)
+        # ints
+        self.desktop = int(fields[1])
+        self.x = int(fields[3])
+        self.y = int(fields[4])
+        self.width = int(fields[5])
+        self.height = int(fields[6])
+        # process
+        self.executable = path.realpath(path.join("/proc", fields[2], "exe"))
 
-  wmctrl -p -G -l | awk '($2 != -1)&&($3 != 0)&&($NF != "Desktop")' | while read window_info; do
-    # ID Desktop PID X Y Width Height Host? Title
-    echo $window_info
-    id="$(echo $window_info | awk '{print $1}')"
-    title="$(echo $window_info | awk '{print substr($0, index($0, $9))}')"
+    def __repr__(self):
+        return("<<id:"+self.id + \
+            "\tdesk:"+str(self.desktop) + \
+            "\tx,y:"+str(self.x)+","+str(self.y) + \
+            "\tw,h:"+str(self.width)+","+str(self.height) + \
+            "\texe:"+self.executable + \
+            "\ttitle:"+self.title+ \
+            ">>")
 
-    # Get desktop, x, y, width, and height info
-    desktop="$(echo $window_info | awk '{print $2}')"
-    x="$(echo $window_info | awk '{print $4}')"
-    y="$(echo $window_info | awk '{print $5}')"
-    width="$(echo $window_info | awk '{print $6}')"
-    height="$(echo $window_info | awk '{print $7}')"
+class WindowMatch():
+    def __init__(self, saved, current):
+        self.saved = saved
+        self.current = current
 
-    # Save info to a line in our save file
-    echo "$id $desktop $x $y $width $height '$title'" >> "${SAVEPATH}/${savename}"
-  done
-}
+    def __str__(self):
+        return("'" + str(self.saved.title) + "'\tMATCHES\t'" + str(self.current.title) + "'")
 
-load_layout () {
-  local savename="$1"
-  cat "${SAVEPATH}/${savename}" | while read window_info; do
-    echo $window_info
-    # Read info from a line in our save file
-    id="$(echo $window_info | cut --delimiter ' ' --fields 1)"
-    desktop="$(echo $window_info | cut --delimiter ' ' --fields 2)"
-    x="$(echo $window_info | cut --delimiter ' ' --fields 3)"
-    y="$(echo $window_info | cut --delimiter ' ' --fields 4)"
-    width="$(echo $window_info | cut --delimiter ' ' --fields 5)"
-    height="$(echo $window_info | cut --delimiter ' ' --fields 6)"
-    title="$(echo $window_info | awk '{print substr($0, index($0, $7))}')"
+def GetWindows():
+    rawWins = RunCommand(["wmctrl",  "-pGl"])
+    wins = []
+    for line in rawWins.splitlines(0):
+        w = Window()
+        w.ParseRawLine(line)
+        if w.desktop < 0:
+            continue
+        wins += [w]
+    return(wins)
 
-    if ! xwininfo -id $id > /dev/null ; then
-      echo ""
-      echo "WARN: Error getting window properties. It might not exist. Continuing with next item."
-      continue
-    fi
+SAVE_FILE_PATH = "/tmp/.window-layout-"+os.environ["USER"]+"-py"
+def saveFileName(fileName):
+    return(path.join(SAVE_FILE_PATH, fileName))
 
-    # Most programs need x,y adjusted by window decoration amounts.
-    # The only relationship I can find is that windows with northwest gravity
-    # as reported by xprop (but not by xwininfo) are offset, whereas windows
-    # with static gravity are not. I haven't observed other gravities.
-    # Some windows (chrome) aren't set at all, and the default is northwest.
-    # GTK windows do not give decoration information and do not need adjusted.
-    properties="$(xprop WM_NORMAL_HINTS -id $id)"
-    # ^ does not exist w/ chrome!?!?
-    net_frame_extents="$(xprop _NET_FRAME_EXTENTS -id $id)"
-    if [[ ! "${net_frame_extents}" =~ "not found" ]] && \
-       ( [[ ! "$properties" =~ "window gravity:" ]] || \
-         [[ "$properties" =~ "window gravity: NorthWest" ]] ) ; then
-      # Get window decorations
-      decoration="$(echo "$net_frame_extents" | cut --delimiter '=' --fields 2 | tr --delete ' ')"
-      decor_left="$(echo $decoration | cut --delimiter ',' --fields 1)"
-      # decor_right="$(echo $decoration | cut --delimiter ',' --fields 2)"
-      decor_top="$(echo $decoration | cut --delimiter ',' --fields 3)"
-      # decor_bottom="$(echo $decoration | cut --delimiter ',' --fields 4)"
-      x=$(($x - $decor_left))
-      y=$(($y - $decor_top))
-      echo "New x,y computed: $x, $y"
-    fi
+def SaveWindows(fileName):
+    wins = GetWindows()
+    os.makedirs(SAVE_FILE_PATH, exist_ok=True)
+    b = open(saveFileName(fileName), mode="wb")
+    pickle.dump(wins, b)
 
-    # Set position and desktop for each window ID
-    wmctrl -i -r "$id" -e "0,$x,$y,$width,$height"
-    wmctrl -i -r "$id" -t "$desktop"
-  done
-}
+def LoadWindows(fileName):
+    b = open(saveFileName(fileName), mode='rb')
+    return(pickle.load(b))
 
-list_saves () {
-  echo ""
-  ls "${SAVEPATH}"
-}
+def WinsByExe(wins):
+    byExe = {}
+    for w in wins:
+        l = byExe.get(w.executable, [])
+        l += [w]
+        byExe[w.executable] = l
+    return(byExe)
 
-mkdir -p "${SAVEPATH}"
+def TitleSimilarity(savedWin, currentWin):
+    # look for right-to-left similarity
+    target = savedWin.title
+    test = currentWin.title
+    match = ""
+    for i in range(len(target)):
+        if target[len(target)-i:] == test[len(test)-i:]:
+            match = target[len(target)-i:]
+            continue
+        break
+    maxlen = max([len(target), len(test)])
+    sim = float(len(match)) / maxlen
+    # print("title similarity of '" + target + "' vs. '" + test + "' = " + str(sim))
+    return(sim)
 
-case $mode in
-  save)
-  save_layout "$savename"
-  ;;
-  load)
-  load_layout "$savename"
-  ;;
-  list)
-  list_saves
-  ;;
-  -h|--help)
-  echo "$USAGE"
-  ;;
-  *)
-  echo "ERR: invalid mode '$mode'"
-  echo "$USAGE"
-  exit 2
-  ;;
-esac
+def sizeSimilarity(target, test):
+    if test <= target:
+        sim = float(test)/float(target)
+    elif test >= target*2:
+        sim = 0.0  # dimensions equal to or greater than twice-the-target are zero percent similar
+    else :
+        sim = 1.0 - float( test - target )/float(target)
+    return(sim)
+
+def WidthSimilarity(savedWin, currentWin):
+    sim = sizeSimilarity(savedWin.width, currentWin.width)
+    # print("width similarity of '" + savedWin.title + "' vs. '" + currentWin.title + "' = " + str(sim))
+    return(sim)
+
+def HeightSimilarity(savedWin, currentWin):
+    sim = sizeSimilarity(savedWin.height, currentWin.height)
+    # print("height similarity of '" + savedWin.title + "' vs. '" + currentWin.title + "' = " + str(sim))
+    return(sim)
+
+def Matches(savedWins, currentWins, similarityMetricFunctions):
+    winMatches = []
+    madeMatch = True
+    while len(savedWins) > 0 and madeMatch == True:
+        for i in range(len(savedWins)):
+            # print("ITERATION: " + str(i))
+            # print("saved: "+str(savedWins))
+            # print("current: "+str(currentWins))
+            madeMatch = False
+            s = savedWins[i]
+            simlist = []
+            if len(currentWins) == 0:
+                break
+            for j in range(len(currentWins)):
+                c = currentWins[j]
+                sim = 0.0
+                for metricFxn in similarityMetricFunctions:
+                    msim = metricFxn(s, c)
+                    if msim < 0.2:
+                        msim = 0  # anything less than 20% match is assumed non-matching
+                    sim += msim
+                simlist += [sim]
+            maxsim = max(simlist)
+            if maxsim == 0.0:
+                continue
+            if len(simlist) > 1 :
+                stdev = stat.stdev(simlist) # use stdev to find statistically good match
+                distToMax = [maxsim - s for s in simlist]
+                distToMax.remove(0.0) # remove one instance of zero
+                madeMatch = True
+                for d in distToMax:
+                    if d <= stdev:
+                        # print("no statistically good match for "+s.title)
+                        madeMatch = False # did not find a statistically good match here
+                        break
+            else:
+                madeMatch = ( simlist[0] >= 0.5 )
+            if madeMatch:
+                cidx = simlist.index(maxsim)
+                m = WindowMatch(savedWins.pop(i), currentWins.pop(cidx))
+                # print("MATCH: "+str(m))
+                # print("savedwins: " + str(savedWins))
+                # print("currentWins: " + str(currentWins))
+                winMatches += [m]
+                break
+    return(winMatches, savedWins, currentWins)
+
+def SetGeometry(windowMatch):
+    currID = windowMatch.current.id
+    saved = windowMatch.saved
+    left, top = GetGeometryOffsets(currID)
+    RunCommand(["wmctrl",  "-i", "-r", currID,
+        "-e", "0,{},{},{},{}".format(saved.x - left, saved.y - top, saved.width, saved.height)])
+    RunCommand(["wmctrl", "-i", "-r", currID, "-t", str(saved.desktop)])
+
+# Most programs need x,y adjusted by window decoration amounts.
+# The only relationship I can find is that windows with northwest gravity
+# as reported by xprop (but not by xwininfo) are offset, whereas windows
+# with static gravity are not. I haven't observed other gravities.
+# Some windows (chrome) aren't set at all, and the default is northwest.
+# GTK windows do not give decoration information and do not need adjusted.
+def GetGeometryOffsets(windowID):
+    hints = RunCommand(["xprop", "WM_NORMAL_HINTS", "-id", windowID])
+    #print(hints)
+    extents = RunCommand(["xprop", "_NET_FRAME_EXTENTS", "-id", windowID])
+    #print(extents)
+    if "not found" in extents or ("window gravity:" in hints and not "window gravity: NorthWest" in hints):
+        return 0,0 # x offset, y offset
+    decorations = extents.split("=")[1].rstrip().replace(" ", "").split(",")
+    decorLeft = decorations[0]
+    decorTop = decorations[2]
+    #print("offsetting by " + decorLeft + ", " + decorTop)
+    return(int(decorLeft), int(decorTop))
+
+
+#
+# Main
+#
+op = args.operation[0]
+filename = args.filename[0]
+
+if op == "save":
+    SaveWindows(filename)
+    exit(0)
+elif op == "load":
+    savedWins = LoadWindows(filename)
+else:
+    raise Exception("unknown operation: "+op)
+
+savedByExe = WinsByExe(savedWins)
+currentByExe = WinsByExe(GetWindows())
+
+windowMatches = []
+for exe in savedByExe:
+    if len(currentByExe.get(exe, [])) == 0:
+        print("no windows with executable '" + savedByExe[exe][0].executable + "' currently exist. Continuing.")
+        savedByExe[exe] = []
+        continue
+    if len(savedByExe[exe]) == 1 and len(currentByExe[exe]) == 1:
+        # print("single match for window with executable '" + savedByExe[exe][0].executable)
+        windowMatches += [WindowMatch(savedByExe[exe][0], currentByExe[exe][0])]
+        savedByExe[exe] = []
+        currentByExe[exe] = []
+        continue
+    matches, leftoverSaved, leftoverCurrent = Matches(savedByExe[exe], currentByExe[exe], [TitleSimilarity])
+    #print("saved: " + str(leftoverSaved))
+    #print("current: "+ str(leftoverCurrent))
+    windowMatches += matches
+    matches, leftoverSaved, leftoverCurrent = Matches(leftoverSaved, leftoverCurrent, [WidthSimilarity, HeightSimilarity])
+    windowMatches += matches
+    savedByExe[exe] = leftoverSaved
+    currentByExe[exe] = leftoverCurrent
+
+for m in windowMatches:
+    print(m)
+    SetGeometry(m)
+
+print("AMBIGUOUS WINDOWS:")
+for e in savedByExe:
+    if savedByExe[e]:
+        print("    " + str(savedByExe[e]))
