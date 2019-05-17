@@ -141,8 +141,8 @@ def Matches(savedWins, currentWins, similarityMetricFunctions):
                 sim = 0.0
                 for metricFxn in similarityMetricFunctions:
                     msim = metricFxn(s, c)
-                    if msim < 0.2:
-                        msim = 0  # anything less than 20% match is assumed non-matching
+                    if msim < 0.35:
+                        msim = 0  # anything less than 35% match is assumed non-matching
                     sim += msim
                 simlist += [sim]
             maxsim = max(simlist)
