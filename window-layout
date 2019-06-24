@@ -80,7 +80,7 @@ def extractValueFromXwininfoLine(fullFieldText, multilineText):
     match = matcher.search(multilineText)
     return match.group(1)
 
-SAVE_FILE_PATH = "/tmp/.window-layout-"+os.environ["USER"]+"-py"
+SAVE_FILE_PATH = os.environ["HOME"]+"/.local/share/window-layout"
 def saveFileName(fileName):
     return(path.join(SAVE_FILE_PATH, fileName))
 
