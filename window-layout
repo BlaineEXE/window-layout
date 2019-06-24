@@ -4,6 +4,7 @@ import argparse
 import os
 import os.path as path
 import pickle
+import re
 import statistics as stat
 import subprocess
 
@@ -24,20 +25,19 @@ class Window:
     def __init__(self):
         return
 
-    def ParseRawLine(self, line):
+    def NewFromWmctrlListLine(self, line):
         fields = line.split()
         # strings
         self.id = fields[0]
-        t = fields[8:]
+        t = fields[4:]
         self.title = " ".join(t)
+        print("parsing " + self.title)
         # ints
         self.desktop = int(fields[1])
-        self.x = int(fields[3])
-        self.y = int(fields[4])
-        self.width = int(fields[5])
-        self.height = int(fields[6])
+        self.x, self.y, self.width, self.height = getWindowXYWH(self.id)
         # process
-        self.executable = path.realpath(path.join("/proc", fields[2], "exe"))
+        pid = fields[2]
+        self.executable = path.realpath(path.join("/proc", pid, "exe"))
 
     def __repr__(self):
         return("<<id:"+self.id + \
@@ -57,15 +57,28 @@ class WindowMatch():
         return("'" + str(self.saved.title) + "'\tMATCHES\t'" + str(self.current.title) + "'")
 
 def GetWindows():
-    rawWins = RunCommand(["wmctrl",  "-pGl"])
+    rawWins = RunCommand(["wmctrl", "-pl"])
     wins = []
     for line in rawWins.splitlines(0):
         w = Window()
-        w.ParseRawLine(line)
+        w.NewFromWmctrlListLine(line)
         if w.desktop < 0:
             continue
         wins += [w]
     return(wins)
+
+def getWindowXYWH(windowID):
+    rawInfo = RunCommand(["xwininfo", "-id", windowID])
+    x = extractValueFromXwininfoLine("Absolute upper-left X", rawInfo)
+    y = extractValueFromXwininfoLine("Absolute upper-left Y", rawInfo)
+    w = extractValueFromXwininfoLine("Width", rawInfo)
+    h = extractValueFromXwininfoLine("Height", rawInfo)
+    return int(x), int(y), int(w), int(h)
+
+def extractValueFromXwininfoLine(fullFieldText, multilineText):
+    matcher = re.compile(r"{}\:\s+(-?\d+)".format(fullFieldText))
+    match = matcher.search(multilineText)
+    return match.group(1)
 
 SAVE_FILE_PATH = "/tmp/.window-layout-"+os.environ["USER"]+"-py"
 def saveFileName(fileName):
@@ -145,11 +158,13 @@ def Matches(savedWins, currentWins, similarityMetricFunctions):
                         msim = 0  # anything less than 35% match is assumed non-matching
                     sim += msim
                 simlist += [sim]
+            # print("simlist:", str(simlist))
             maxsim = max(simlist)
             if maxsim == 0.0:
                 continue
             if len(simlist) > 1 :
                 stdev = stat.stdev(simlist) # use stdev to find statistically good match
+                # print("stdev:", str(stdev))
                 distToMax = [maxsim - s for s in simlist]
                 distToMax.remove(0.0) # remove one instance of zero
                 madeMatch = True
@@ -183,14 +198,20 @@ def SetGeometry(windowMatch):
 # as reported by xprop (but not by xwininfo) are offset, whereas windows
 # with static gravity are not. I haven't observed other gravities.
 # Some windows (chrome) aren't set at all, and the default is northwest.
-# GTK windows do not give decoration information and do not need adjusted.
+# GTK windows running in KDE do not give decoration information and do not
+# need adjusted. GTK windows running in Gnome DO give decoration info.
 def GetGeometryOffsets(windowID):
     hints = RunCommand(["xprop", "WM_NORMAL_HINTS", "-id", windowID])
     #print(hints)
-    extents = RunCommand(["xprop", "_NET_FRAME_EXTENTS", "-id", windowID])
-    #print(extents)
-    if "not found" in extents or ("window gravity:" in hints and not "window gravity: NorthWest" in hints):
+    if "window gravity:" in hints and not "window gravity: NorthWest" in hints:
         return 0,0 # x offset, y offset
+    extents = RunCommand(["xprop", "_NET_FRAME_EXTENTS", "-id", windowID])
+    # gtkExtents = RunCommand(["xprop", "_GTK_FRAME_EXTENTS", "-id", windowiD])
+    #print(extents)
+    if "not found" in extents:
+        # no extent information, so no offsets
+        return 0,0
+    # _NET_FRAME_EXTENTS = left, right, top, bottom
     decorations = extents.split("=")[1].rstrip().replace(" ", "").split(",")
     decorLeft = decorations[0]
     decorTop = decorations[2]
