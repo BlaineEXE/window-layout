@@ -194,19 +194,8 @@ def SetGeometry(windowMatch):
     RunCommand(["wmctrl", "-i", "-r", currID, "-t", str(saved.desktop)])
 
 # Most programs need x,y adjusted by window decoration amounts.
-# The only relationship I can find is that windows with northwest gravity
-# as reported by xprop (but not by xwininfo) are offset, whereas windows
-# with static gravity are not. I haven't observed other gravities.
-# Some windows (chrome) aren't set at all, and the default is northwest.
-# GTK windows running in KDE do not give decoration information and do not
-# need adjusted. GTK windows running in Gnome DO give decoration info.
 def GetGeometryOffsets(windowID):
-    hints = RunCommand(["xprop", "WM_NORMAL_HINTS", "-id", windowID])
-    #print(hints)
-    if "window gravity:" in hints and not "window gravity: NorthWest" in hints:
-        return 0,0 # x offset, y offset
     extents = RunCommand(["xprop", "_NET_FRAME_EXTENTS", "-id", windowID])
-    # gtkExtents = RunCommand(["xprop", "_GTK_FRAME_EXTENTS", "-id", windowiD])
     #print(extents)
     if "not found" in extents:
         # no extent information, so no offsets
