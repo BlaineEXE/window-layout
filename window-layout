@@ -37,7 +37,7 @@ class Window:
         self.x, self.y, self.width, self.height = getWindowXYWH(self.id)
         # process
         pid = fields[2]
-        self.executable = path.realpath(path.join("/proc", pid, "exe"))
+        self.executable = RunCommand(["ps", "-p", pid, "-o", "comm="])
 
     def __repr__(self):
         return("<<id:"+self.id + \
